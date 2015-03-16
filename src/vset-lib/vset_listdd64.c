@@ -94,6 +94,7 @@ static struct op_rec *op_cache=NULL;
 #define OP_JOIN 12
 #define OP_CCOUNT1 13
 #define OP_CCOUNT2 14
+#define OP_NEXT_UNION 15
 
 static void cache_put(uint64_t slot_hash,
                       uint32_t op,
@@ -392,6 +393,7 @@ static void mdd_collect(uint64_t a,uint64_t b){
                 else continue;
             }
             case OP_PREV:
+            case OP_NEXT_UNION:
             {
                 if (!node_table[op_cache[i].arg1].reachable) {
                     op_cache[i].op=OP_UNUSED;
@@ -1326,6 +1328,166 @@ mdd_next_write(uint64_t p_id, uint64_t set, uint64_t rel, int idx, int *r_proj, 
     return res;
 }
 
+static uint64_t
+mdd_next_union_write(uint64_t p_id, uint64_t set, uint64_t rel, uint64_t uni, int idx, int *r_proj, int r_len, int* w_proj, int w_len);
+
+static uint64_t
+mdd_next_union(uint64_t p_id, uint64_t set, uint64_t rel, uint64_t uni, int idx, int *r_proj, int r_len, int* w_proj, int w_len)
+{
+    if (r_len < 0 || w_len < 0) Abort("Rel out of bounds");
+    if (set==0) return uni;
+    if (uni==0) return mdd_next(p_id, set, rel, idx, r_proj, r_len, w_proj, w_len);
+    if (rel==0) return uni;
+    if (w_len==0&&r_len==0) return mdd_union(set, uni);
+    if (rel==1||set==1||uni==1) {
+        Abort("missing case in next_union; set: %" PRIu64 ", rel: %" PRIu64 ", uni: %" PRIu64 " idx=%d, r_len=%d, w_len=%d",
+              set, rel, uni, idx, r_len, w_len);
+    }
+
+    uint64_t slot_hash;
+    uint64_t old_rel;
+    uint64_t old_set;
+    uint64_t old_uni;
+    uint64_t slot;
+
+    uint64_t res=0;
+
+    if ((r_len > 0 && r_proj[0]==idx) && (w_len > 0 && w_proj[0] == idx)) { // +
+
+        if (!mdd_match(&set, &rel)) return uni;
+
+        slot_hash=hash5(OP_NEXT_UNION,set,rel,uni,p_id);
+        slot=slot_hash%cache_size;
+        if (op_cache[slot].op==OP_NEXT_UNION && op_cache[slot].arg1==set
+            && op_cache[slot].res.other.arg2==rel
+            && op_cache[slot].res.other.arg3==uni
+            && op_cache[slot].res.other.arg4==p_id) {
+            return op_cache[slot].res.other.res;
+        }
+
+        old_rel=rel;
+        old_set=set;
+        old_uni=uni;
+
+        mdd_push(mdd_next_union(p_id, node_table[set].right, node_table[rel].right, uni, idx, r_proj, r_len, w_proj, w_len));
+        res = mdd_next_union_write(node_table[p_id].down, set, node_table[rel].down, uni, idx, r_proj + 1, r_len - 1, w_proj, w_len);
+        res = mdd_union(res, mdd_pop());
+
+    } else if (r_len > 0 && r_proj[0]==idx) { // r
+
+        Abort("not implemented");
+
+        if (!mdd_match(&set, &rel)) return uni;
+
+        slot_hash=hash5(OP_NEXT_UNION,set,rel,uni,p_id);
+        slot=slot_hash%cache_size;
+        if (op_cache[slot].op==OP_NEXT_UNION && op_cache[slot].arg1==set
+            && op_cache[slot].res.other.arg2==rel
+            && op_cache[slot].res.other.arg3==uni
+            && op_cache[slot].res.other.arg4==p_id) {
+            return op_cache[slot].res.other.res;
+        }
+        old_rel=rel;
+        old_set=set;
+        old_uni=uni;
+
+        res = mdd_next_union(p_id, node_table[set].right, node_table[rel].right, 1, idx, r_proj, r_len, w_proj, w_len);
+
+        mdd_push(res);
+        uint64_t tmp = mdd_next_union(node_table[p_id].down, node_table[set].down,
+                                node_table[rel].down, 1, idx+1, r_proj+1, r_len-1, w_proj, w_len);
+        res=mdd_create_node(node_table[set].val,tmp,mdd_pop(),COPY_DONT_CARE);
+
+    } else if (w_len > 0 && w_proj[0] == idx) { // w
+
+        Abort("not implemented");
+
+        slot_hash=hash5(OP_NEXT_UNION,set,rel,uni,p_id);
+        slot=slot_hash%cache_size;
+        if (op_cache[slot].op==OP_NEXT_UNION && op_cache[slot].arg1==set
+            && op_cache[slot].res.other.arg2==rel
+            && op_cache[slot].res.other.arg3==uni
+            && op_cache[slot].res.other.arg4==p_id) {
+            return op_cache[slot].res.other.res;
+        }
+        old_rel=rel;
+        old_set=set;
+        old_uni=uni;
+
+        mdd_push(mdd_next_union(p_id, node_table[set].right, rel, 1, idx, r_proj, r_len, w_proj, w_len));
+        res = mdd_next_union_write(p_id, set, rel, 1, idx, r_proj, r_len, w_proj, w_len);
+        res = mdd_union(res, mdd_pop());
+
+    } else { // -
+
+        slot_hash=hash5(OP_NEXT_UNION,set,rel,uni,p_id);
+        slot=slot_hash%cache_size;
+        if (op_cache[slot].op==OP_NEXT_UNION && op_cache[slot].arg1==set
+            && op_cache[slot].res.other.arg2==rel
+            && op_cache[slot].res.other.arg3==uni
+            && op_cache[slot].res.other.arg4==p_id) {
+            return op_cache[slot].res.other.res;
+        }
+        old_rel=rel;
+        old_set=set;
+        old_uni=uni;
+
+        uint32_t val;
+        if (node_table[set].val < node_table[uni].val) {
+            mdd_push(mdd_next_union(p_id, node_table[set].right, rel, uni, idx, r_proj, r_len, w_proj, w_len));
+            res=mdd_next_union(p_id,node_table[set].down,rel,0,idx+1,r_proj,r_len, w_proj, w_len);
+            val = node_table[set].val;
+        } else if(node_table[uni].val < node_table[set].val) {
+            mdd_push(mdd_next_union(p_id, set, rel, node_table[uni].right, idx, r_proj, r_len, w_proj, w_len));
+            res=mdd_next_union(p_id,0,0,node_table[uni].down,idx+1,r_proj,r_len, w_proj, w_len);
+            val = node_table[uni].val;
+        } else { /* node_table[uni].val == node_table[set.val] */
+            mdd_push(mdd_next_union(p_id, node_table[set].right, rel, node_table[uni].right, idx, r_proj, r_len, w_proj, w_len));
+            res=mdd_next_union(p_id,node_table[set].down,rel,node_table[uni].down,idx+1,r_proj,r_len, w_proj, w_len);
+            val = node_table[set].val;
+        }
+        res=mdd_create_node(val,res,mdd_pop(),COPY_DONT_CARE);
+    }
+
+    cache_put(slot_hash, OP_NEXT_UNION, old_set, old_rel, old_uni, p_id, res);
+    return res;
+}
+
+static uint64_t
+mdd_next_union_write(uint64_t p_id, uint64_t set, uint64_t rel, uint64_t uni, int idx, int *r_proj, int r_len, int* w_proj, int w_len)
+{
+    if (rel==0) return uni;
+    if (uni==0) return mdd_next_write(p_id, set, rel, idx, r_proj, r_len, w_proj, w_len);
+    if (rel==1||set==1||uni==1||(r_len==0&&w_len==0)) {
+        Abort("missing case in next_union; set: %" PRIu64 ", rel: %" PRIu64 ", uni: %" PRIu64 " idx=%d, r_len=%d, w_len=%d",
+              set, rel, uni, idx, r_len, w_len);
+    }
+
+    uint64_t res;
+    uint32_t val;
+
+    if (node_table[rel].copy == COPY_COPY) Abort("not implemented");
+
+    if (node_table[uni].val < node_table[rel].val) {
+        mdd_push(mdd_next_union_write(p_id, set, rel, node_table[uni].right, idx, r_proj, r_len, w_proj, w_len));
+        res = mdd_next_union(node_table[p_id].down, 0, 0, node_table[uni].down, idx + 1, r_proj, r_len, w_proj + 1, w_len - 1);
+        val = node_table[uni].val;
+    } else if (node_table[rel].val < node_table[uni].val) {
+        mdd_push(mdd_next_union_write(p_id, set, node_table[rel].right, uni, idx, r_proj, r_len, w_proj, w_len));
+        res = mdd_next_union(node_table[p_id].down, node_table[set].down, node_table[rel].down, 0, idx + 1, r_proj, r_len, w_proj + 1, w_len - 1);
+        val = node_table[rel].val;
+    } else { /* node_table[rel].val == node_table[uni].val */
+        mdd_push(mdd_next_union_write(p_id, set, node_table[rel].right, node_table[uni].right, idx, r_proj, r_len, w_proj, w_len));
+        res = mdd_next_union(node_table[p_id].down, node_table[set].down, node_table[rel].down, node_table[uni].down, idx + 1, r_proj, r_len, w_proj + 1, w_len - 1);
+        val = node_table[uni].val;
+    }
+
+    res = mdd_create_node(val,res,0,COPY_DONT_CARE);
+    res = mdd_union(res, mdd_pop());
+
+    return res;
+}
+
 static void
 set_project_mdd(vset_t dst, vset_t src)
 {
@@ -1343,6 +1505,13 @@ set_next_mdd(vset_t dst, vset_t src, vrel_t rel)
 {
     assert(src->p_len == src->dom->shared.size && dst->p_len == dst->dom->shared.size);
     dst->mdd = mdd_next(rel->p_id, src->mdd, rel->mdd, 0, rel->r_proj, rel->r_p_len, rel->w_proj, rel->w_p_len);
+}
+
+static void
+set_next_union_mdd(vset_t dst, vset_t src, vrel_t rel, vset_t uni)
+{
+    assert(src->p_len == src->dom->shared.size && dst->p_len == src->dom->shared.size && uni->p_len == src->dom->shared.size);
+    dst->mdd = mdd_next_union(rel->p_id, src->mdd, rel->mdd, uni->mdd, 0, rel->r_proj, rel->r_p_len, rel->w_proj, rel->w_p_len);
 }
 
 static void
@@ -2380,6 +2549,7 @@ vdom_t vdom_create_list64_native(int n){
     dom->shared.rel_count=rel_count_mdd;
     dom->shared.set_project=set_project_mdd;
     dom->shared.set_next=set_next_mdd;
+    dom->shared.set_next_union=set_next_union_mdd;
     dom->shared.set_prev=set_prev_mdd;
     dom->shared.set_universe=set_universe_mdd;
     dom->shared.set_example=set_example_mdd;
