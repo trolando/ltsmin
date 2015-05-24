@@ -208,6 +208,11 @@ void HREenableThreads(int threads, bool selected){
     }
 }
 
+int HREisMultiThreaded()
+{
+    return run_threads;
+}
+
 void HREdisableSingle(){
     run_single=0;
 }

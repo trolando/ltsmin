@@ -61,6 +61,9 @@ Thread support can be disabled by calling this function with 0 as argument.
 */
 extern void HREenableThreads(int threads, bool selected);
 
+// returns 1 if multi-threaded and number of threads > 1
+int HREisMultiThreaded();
+
 /**
 \brief Enable the multi process runtime.
 

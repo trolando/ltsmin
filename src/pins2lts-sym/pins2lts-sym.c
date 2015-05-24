@@ -4268,6 +4268,8 @@ main (int argc, char *argv[])
 
 #ifdef HAVE_SYLVAN
     lace_n_workers = n_workers;
+    // ugly hack to turn HREisMultiThreaded to true
+    HREenableThreads(n_workers, 1);
 
     Print(infoLong, "Worker %d / %d (pid = %d).", HREme(HREglobal()), HREpeers(HREglobal()), getpid());
 
