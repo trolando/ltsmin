@@ -73,6 +73,7 @@ struct vector_relation
     BDD bdd;                    // Represented BDD
 
     int r_k, w_k;
+    int *w_proj;                // easier for rel_add_cpy
     BDD cur_is_next;
 
     BDD state_variables;        // X
@@ -149,6 +150,8 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
 
     rel->r_k = r_k;
     rel->w_k = w_k;
+    rel->w_proj = (int*)RTmalloc(sizeof(int)*w_k);
+    memcpy(rel->w_proj, w_proj, sizeof(int)*w_k);
 
     /* Compute a_proj the union of r_proj and w_proj, and a_k the length of a_proj */
     int a_proj[r_k+w_k];
@@ -230,6 +233,7 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
         }
     }
     rel->all_variables = sylvan_ref(sylvan_set_fromarray(all_vars, statebits * a_k * 2));
+    rel->all_action_variables = sylvan_ref(sylvan_or(rel->all_variables, rel->dom->action_variables));
 
     /* Compute cur_is_next for variables in ro_proj */
     BDD cur_is_next = sylvan_true;
@@ -549,7 +553,7 @@ rel_count(vrel_t rel, long *nodes, bn_int_t *elements)
 {
     LACE_ME;
     if (nodes != NULL) *nodes = sylvan_nodecount(rel->bdd);
-    if (elements != NULL) bn_double2int((double)sylvan_satcount(rel->bdd, rel->all_variables), elements);
+    if (elements != NULL) bn_double2int((double)sylvan_satcount(rel->bdd, rel->all_action_variables), elements);
 }
 
 /**
@@ -656,7 +660,7 @@ set_zip(vset_t dst, vset_t src)
  * Add (src, dst) to the relation
  */
 static void
-rel_add(vrel_t rel, const int *src, const int *dst)
+rel_add_act(vrel_t rel, const int *src, const int *dst, const int *cpy, const int act)
 {
     LACE_ME;
 
@@ -668,10 +672,94 @@ rel_add(vrel_t rel, const int *src, const int *dst)
     state_to_cube(src, (size_t)rel->r_k, src_cube);
     BDD src_bdd = bdd_refs_push(sylvan_cube(rel->state_variables, src_cube));
 
-    // make cube of dst
-    char dst_cube[rel->w_k * statebits];
-    state_to_cube(dst, (size_t)rel->w_k, dst_cube);
-    BDD dst_bdd = bdd_refs_push(sylvan_cube(rel->prime_variables, dst_cube));
+    // Some custom code to create the BDD representing the dst+cpy structure
+    BDD dst_bdd = sylvan_true;
+    for (int i=rel->w_k-1; i>=0; i--) {
+        int k = rel->w_proj[i];
+        if (cpy && cpy[i]) {
+            // take copy of read
+            bdd_refs_push(dst_bdd);
+            for (int j=statebits-1; j>=0; j--) {
+                BDD low = bdd_refs_push(sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false));
+                BDD high = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
+                bdd_refs_pop(2);
+                dst_bdd = bdd_refs_push(sylvan_makenode(2*(k*statebits+j), low, high));
+            }
+            bdd_refs_pop(1);
+        } else {
+            // actually write
+            for (int j=statebits-1; j>=0; j--) {
+                if (dst[i] & (1LL<<(statebits-j-1))) dst_bdd = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
+                else dst_bdd = sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false);
+            }
+        }
+    }
+    bdd_refs_push(dst_bdd);
+
+    // make cube of action
+    char act_cube[actionbits];
+    for (int i=0; i<actionbits; i++) {
+        act_cube[i] = (act & (1LL<<(actionbits-i-1))) ? 1 : 0;
+    }
+    BDD act_bdd = bdd_refs_push(sylvan_cube(rel->dom->action_variables, act_cube));
+
+    // concatenate dst and act
+    BDD dst_and_act = bdd_refs_push(sylvan_and(dst_bdd, act_bdd));
+
+    // concatenate src and dst and act
+    BDD src_and_dst_and_act = bdd_refs_push(sylvan_and(src_bdd, dst_and_act));
+
+    // intersect with cur_is_next
+    BDD to_add = bdd_refs_push(sylvan_and(src_and_dst_and_act, rel->cur_is_next));
+
+    // add result to relation
+    BDD old = rel->bdd;
+    rel->bdd = sylvan_ref(sylvan_or(rel->bdd, to_add));
+    sylvan_deref(old);
+
+    bdd_refs_pop(6);
+}
+
+/**
+ * Add (src, dst) to the relation
+ */
+static void
+rel_add_cpy(vrel_t rel, const int *src, const int *dst, const int *cpy)
+{
+    LACE_ME;
+
+    check_state(src, rel->r_k);
+    check_state(dst, rel->w_k);
+
+    // make cube of src
+    char src_cube[rel->r_k * statebits];
+    state_to_cube(src, (size_t)rel->r_k, src_cube);
+    BDD src_bdd = bdd_refs_push(sylvan_cube(rel->state_variables, src_cube));
+
+    // Some custom code to create the BDD representing the dst+cpy structure
+    BDD dst_bdd = sylvan_true;
+    for (int i=rel->w_k; i>=0; i--) {
+        int k = rel->w_proj[i];
+        if (cpy && cpy[i]) {
+            // take copy of read
+            bdd_refs_push(dst_bdd);
+            for (int j=statebits-1; j>=0; j--) {
+                BDD low = bdd_refs_push(sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false));
+                BDD high = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
+                bdd_refs_pop(2);
+                dst_bdd = bdd_refs_push(sylvan_makenode(2*(k*statebits+j), low, high));
+            }
+            bdd_refs_pop(1);
+        } else {
+            // actually write
+            for (int j=statebits-1; j>=0; j--) {
+                if (dst[i] & (1LL<<(statebits-j-1))) dst_bdd = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
+                else dst_bdd = sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false);
+            }
+        }
+    }
+    sylvan_test_isbdd(dst_bdd);
+    bdd_refs_push(dst_bdd);
 
     // concatenate src and dst
     BDD src_and_dst = bdd_refs_push(sylvan_and(src_bdd, dst_bdd));
@@ -685,6 +773,15 @@ rel_add(vrel_t rel, const int *src, const int *dst)
     sylvan_deref(old);
 
     bdd_refs_pop(4);
+}
+
+/**
+ * Add (src, dst) to the relation
+ */
+static void
+rel_add(vrel_t rel, const int *src, const int *dst)
+{
+    return rel_add_cpy(rel, src, dst, 0);
 }
 
 static void
@@ -820,7 +917,7 @@ separates_rw()
 static int
 supports_cpy()
 {
-    return 0;
+    return 1;
 }
 
 static void
@@ -848,6 +945,8 @@ dom_set_function_pointers(vdom_t dom)
     dom->shared.set_project=set_project;
     dom->shared.set_count=set_count;
     dom->shared.rel_create_rw=rel_create_rw;
+    dom->shared.rel_add_act=rel_add_act;
+    dom->shared.rel_add_cpy=rel_add_cpy;
     dom->shared.rel_add=rel_add;
     dom->shared.rel_count=rel_count;
     dom->shared.set_next=set_next;
