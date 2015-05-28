@@ -948,4 +948,14 @@ extern void GBsetMucalcNodeCount(model_t model, int node_count);
  */
 extern int GBgetUseGuards(model_t model);
 
+/**
+ * \brief Sets whether this model is thread-safe or not
+ */
+void GBsetThreadSafe(model_t model, int thread_safe);
+
+/**
+ * \brief If this model is thread-safe or not
+ */
+int GBisThreadSafe(model_t model);
+
 #endif

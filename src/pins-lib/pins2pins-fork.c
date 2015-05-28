@@ -490,6 +490,9 @@ GBaddFork(model_t parent_model)
     /* initialize as child model */
     GBinitModelDefaults(&forked_model, parent_model);
 
+    /* we are thread-safe */
+    GBsetThreadSafe(forked_model, 1);
+
     /* create fork_context */
     struct fork_context *ctx = HREmalloc(NULL, sizeof(struct fork_context));
     pthread_key_create(&ctx->key, NULL);

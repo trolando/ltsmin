@@ -350,6 +350,9 @@ opaalLoadDynamicLib(model_t model, const char *filename)
     }
     atexit (opaalExit);                   // cleanup
 
+    // TODO: assumption
+    GBsetThreadSafe(model, 1);
+
     // load dynamic library functionality
     get_initial_state = (void(*)(char*))
     RTdlsym( filename, dlHandle, "get_initial_state" );
@@ -451,6 +454,8 @@ opaalLoadGreyboxModel(model_t model, const char *filename)
 
     gb_context_t ctx=(gb_context_t)RTmalloc(sizeof(struct grey_box_context));
     GBsetContext(model,ctx);
+
+    GBsetThreadSafe(model, 1);
 
     // get ltstypes
     int state_length = get_state_variable_count();

@@ -295,6 +295,8 @@ PromLoadGreyboxModel(model_t model, const char *filename)
     gb_context_t ctx=(gb_context_t)RTmalloc(sizeof(struct grey_box_context));
     GBsetContext(model,ctx);
 
+    GBsetThreadSafe(model, 1);
+
     // get ltstypes
     ltstype=lts_type_create();
     int state_length = prom_get_state_size();

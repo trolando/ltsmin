@@ -132,6 +132,7 @@ ETFloadGreyboxModel(model_t model, const char *name)
     } else {
         ctx->label_idx=NULL;
     }
+    GBsetThreadSafe(model, 1);
     GBsetLTStype(model,ltstype);
     matrix_t* p_dm_info = (matrix_t*)RTmalloc(sizeof(matrix_t));
     matrix_t* p_dm_read_info = (matrix_t*)RTmalloc(sizeof(matrix_t));

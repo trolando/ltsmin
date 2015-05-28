@@ -575,9 +575,6 @@ int main(int argc, char*argv[]){
     HREaddOptions(options,"Perform a distributed enumerative reachability analysis of <model>\n\nOptions");
     lts_lib_setup();
     HREenableAll();
-    if (!SPEC_MT_SAFE){
-        HREenableThreads(0, false);
-    }
     HREinitStart(&argc,&argv,1,2,files,"<model> [<lts>]");
 
     struct dist_thread_context ctx;

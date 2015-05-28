@@ -87,7 +87,8 @@ hre_init_and_spawn_workers (int argc, char *argv[])
     lts_lib_setup ();
 
     // Only use the multi-process environment if necessary:
-    HRE_PROCS |= !SPEC_MT_SAFE;
+    // Commented out because the pins2pins-fork wrapper now takes care of this
+    // HRE_PROCS |= !SPEC_MT_SAFE;
     HRE_PROCS |= char_array_search (argv, argc, "--" FORCE_STRING);
 
     if (HRE_PROCS) {

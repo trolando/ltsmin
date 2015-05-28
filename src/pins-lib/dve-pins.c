@@ -437,6 +437,7 @@ DVE2loadGreyboxModel(model_t model, const char *filename)
     GBsetDMInfoMayWrite(model, dm_may_write_info);
     GBsetDMInfoMustWrite(model, dm_must_write_info);
     GBsetSupportsCopy(model);
+    GBsetThreadSafe(model, 1);
 
     // set state label matrix (accepting label and guards)
     get_label_method_t sl_long = NULL;

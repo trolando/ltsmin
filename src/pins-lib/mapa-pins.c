@@ -284,6 +284,7 @@ void common_load_model(model_t model,const char*name,int mapa){
     Warning(infoLong,"Loading %s",name);
     prcrl_context_t context=RT_NEW(struct prcrl_context);
     GBsetContext(model,context);
+    GBsetThreadSafe(model, 0);
     main_model=model;
     context->reach_actions=reach_actions=SIcreate();
     if (mapa){

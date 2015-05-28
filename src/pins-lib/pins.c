@@ -20,6 +20,7 @@ struct grey_box_model {
 	matrix_t *dm_may_write_info;
 	matrix_t *dm_must_write_info;
 	int supports_copy;
+    int thread_safe;
 	matrix_t *sl_info;
     sl_group_t* sl_groups[GB_SL_GROUP_COUNT];
     guard_t** guards;
@@ -391,6 +392,7 @@ model_t GBcreateBase(){
 	model->dm_may_write_info=NULL;
 	model->dm_must_write_info=NULL;
 	model->supports_copy=-1;
+    model->thread_safe=0; // by default assume not thread-safe
 	model->sl_info=NULL;
     for(int i=0; i < GB_SL_GROUP_COUNT; i++)
         model->sl_groups[i]=NULL;
@@ -479,6 +481,7 @@ void GBinitModelDefaults (model_t *p_model, model_t default_src)
             model->dm_must_write_info = model->dm_info;
     }
     if (model->supports_copy == -1) model->supports_copy = default_src->supports_copy;
+    model->thread_safe = default_src->thread_safe;
     if (model->dm_info == NULL)
         model->dm_info = default_src->dm_info;
 
@@ -1438,6 +1441,18 @@ struct poptOption greybox_options_ltl[]={
 int
 GBgetUseGuards(model_t model) {
     return model->use_guards;
+}
+
+void
+GBsetThreadSafe(model_t model, int thread_safe)
+{
+    model->thread_safe = thread_safe;
+}
+
+int
+GBisThreadSafe(model_t model)
+{
+    return model->thread_safe;
 }
 
 void*

@@ -247,6 +247,7 @@ void MCRLloadGreyboxModel(model_t m,const char*model){
 	}
 
 	GBsetLTStype(m,ltstype);
+    GBsetThreadSafe(model, 0);
 	GBsetDMInfo(m, &dm_info);
 	dm_create(&sl_info, 0, state_length);
 	GBsetStateLabelInfo(m, &sl_info);
