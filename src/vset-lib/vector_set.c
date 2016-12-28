@@ -34,6 +34,9 @@ extern struct poptOption lddmc_options[];
 extern vdom_t vdom_create_lddmc(int n);
 extern vdom_t vdom_create_lddmc_from_file(FILE *f);
 
+extern vdom_t vdom_create_tbdd(int n);
+extern vdom_t vdom_create_tbdd_from_file(FILE *f);
+
 vset_implementation_t vset_default_domain = VSET_LDDmc;
 #else
 vset_implementation_t vset_default_domain = VSET_ListDD;
@@ -80,6 +83,7 @@ static si_map_entry vset_table[]={
 #ifdef HAVE_SYLVAN
     {"sylvan",VSET_Sylvan},
     {"lddmc",VSET_LDDmc},
+    {"tbdd",VSET_tbdd},
 #endif // HAVE_SYLVAN
 	{NULL,0}
 };
@@ -124,9 +128,10 @@ vdom_create_domain(int n, vset_implementation_t impl)
     switch(impl){
 #ifdef HAVE_SYLVAN
     case VSET_LDDmc: return vdom_create_lddmc(n);
+    case VSET_tbdd: return vdom_create_tbdd(n);
 #endif
-    case VSET_ListDD: return vdom_create_list_native(n);
     case VSET_ListDD64: return vdom_create_list64_native(n);
+    case VSET_ListDD: return vdom_create_list_native(n);
 #ifdef HAVE_ATERM2_H
     case VSET_AtermDD_list: return vdom_create_list(n);
     case VSET_AtermDD_tree: return vdom_create_tree(n);
@@ -150,6 +155,7 @@ vdom_create_domain_from_file(FILE *f, vset_implementation_t impl)
 #ifdef HAVE_SYLVAN
     case VSET_LDDmc: return vdom_create_lddmc_from_file(f);
     case VSET_Sylvan: return vdom_create_sylvan_from_file(f);
+    case VSET_tbdd: return vdom_create_tbdd_from_file(f);
 #endif // HAVE_SYLVAN
     default: return NULL; (void) f;
     }

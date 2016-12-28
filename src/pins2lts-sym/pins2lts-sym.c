@@ -4639,7 +4639,7 @@ static void actual_main(void *arg)
     init_maxsum(ltstype);
 
     /* turn on Lace again (for Sylvan) */
-    if (vset_default_domain==VSET_Sylvan || vset_default_domain==VSET_LDDmc) {
+    if (vset_default_domain==VSET_Sylvan || vset_default_domain==VSET_LDDmc || vset_default_domain==VSET_tbdd) {
         lace_resume();
     }
 
@@ -4834,7 +4834,7 @@ static void actual_main(void *arg)
 
 #ifdef HAVE_SYLVAN
     /* in case other Lace threads were still suspended... */
-    if (vset_default_domain!=VSET_Sylvan && vset_default_domain!=VSET_LDDmc) {
+    if (vset_default_domain!=VSET_Sylvan && vset_default_domain!=VSET_LDDmc && vset_default_domain!=VSET_tbdd) {
         lace_resume();
     } else if (SYLVAN_STATS) {
         sylvan_stats_report(stderr);
