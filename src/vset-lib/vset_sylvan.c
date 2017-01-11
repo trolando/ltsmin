@@ -45,10 +45,10 @@ struct vector_set
 {
     vdom_t dom;
 
-    BDD bdd;
     size_t vector_size;         // size of state vectors in this set
-    BDD state_variables;        // set of state variables in this set
 
+    BDD bdd;
+    BDD state_variables;        // set of state variables in this set
     BDD projection;             // set of state variables not in this set (for set_project)
 };
 
@@ -58,13 +58,13 @@ struct vector_relation
     expand_cb expand;           // compatibility with generic vector_relation
     void *expand_ctx;           // idem
 
+    int r_k, w_k;               // number of read/write in this relation
+    int *r_proj;                //
+    int *w_proj;                //
+
     BDD bdd;
     BDD all_variables;          // all state/prime state variables that the relation is defined on
     BDD all_action_variables;   // union of all_variables and dom->action_variables
-
-    /* the following are for rel_add_cpy */
-    int r_k, w_k;               // number of read/write in this relation
-    int *w_proj;                // easier for rel_add_cpy
     BDD cur_is_next;            // helper BDD for read-only (copy) variables
     BDD state_variables;        // set of READ state variables in this relation
     BDD prime_variables;        // set of WRITE prime state variables in this relation
@@ -85,8 +85,12 @@ set_create(vdom_t dom, int k, int* proj)
 
     set->dom = dom;
     set->bdd = sylvan_false; // Initialize with an empty BDD
+    set->state_variables = sylvan_false;
+    set->projection = sylvan_false;
 
     sylvan_protect(&set->bdd);
+    sylvan_protect(&set->state_variables);
+    sylvan_protect(&set->projection);
 
     if (k>=0 && k<dom->shared.size) {
         // We are creating a projection
@@ -98,15 +102,14 @@ set_create(vdom_t dom, int k, int* proj)
                 state_vars[i*statebits+j] = 2*(proj[i]*statebits+j);
             }
         }
-
-        set->state_variables = sylvan_ref(sylvan_set_fromarray(state_vars, statebits * k));
+        set->state_variables = sylvan_set_fromarray(state_vars, statebits * k);
+        set->projection = sylvan_set_removeall(dom->state_variables, set->state_variables);
     } else {
         // Use all variables
         set->vector_size = dom->shared.size;
-        set->state_variables = sylvan_ref(dom->state_variables);
+        set->state_variables = dom->state_variables;
+        set->projection = sylvan_set_empty();
     }
-
-    set->projection = sylvan_ref(sylvan_set_removeall(dom->state_variables, set->state_variables));
 
     return set;
 }
@@ -119,8 +122,8 @@ static void
 set_destroy(vset_t set) 
 {
     sylvan_unprotect(&set->bdd);
-    sylvan_deref(set->projection);
-    sylvan_deref(set->state_variables);
+    sylvan_unprotect(&set->state_variables);
+    sylvan_unprotect(&set->projection);
     RTfree(set);
 }
 
@@ -137,10 +140,24 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
 
     rel->dom = dom;
     rel->bdd = sylvan_false; // Initially, empty.
+    rel->all_variables = sylvan_false;
+    rel->all_action_variables = sylvan_false;
+    rel->cur_is_next = sylvan_false;
+    rel->state_variables = sylvan_false;
+    rel->prime_variables = sylvan_false;
+
+    sylvan_protect(&rel->bdd);
+    sylvan_protect(&rel->all_variables);
+    sylvan_protect(&rel->all_action_variables);
+    sylvan_protect(&rel->cur_is_next);
+    sylvan_protect(&rel->state_variables);
+    sylvan_protect(&rel->prime_variables);
 
     rel->r_k = r_k;
     rel->w_k = w_k;
+    rel->r_proj = (int*)RTmalloc(sizeof(int)*r_k);
     rel->w_proj = (int*)RTmalloc(sizeof(int)*w_k);
+    memcpy(rel->r_proj, r_proj, sizeof(int)*r_k);
     memcpy(rel->w_proj, w_proj, sizeof(int)*w_k);
 
     /* Compute a_proj the union of r_proj and w_proj, and a_k the length of a_proj */
@@ -187,7 +204,7 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
             state_vars[i*statebits+j] = 2*(r_proj[i]*statebits+j);
         }
     }
-    rel->state_variables = sylvan_ref(sylvan_set_fromarray(state_vars, statebits * r_k));
+    rel->state_variables = sylvan_set_fromarray(state_vars, statebits * r_k);
 
     /* Create set of (write) prime variables for sylvan_cube */
     BDDVAR prime_vars[statebits * w_k];
@@ -196,7 +213,7 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
             prime_vars[i*statebits+j] = 2*(w_proj[i]*statebits+j)+1;
         }
     }
-    rel->prime_variables = sylvan_ref(sylvan_set_fromarray(prime_vars, statebits * w_k));
+    rel->prime_variables = sylvan_set_fromarray(prime_vars, statebits * w_k);
 
     /* Compute all_variables, which are all variables the transition relation is defined on */
     BDDVAR all_vars[statebits * a_k * 2];
@@ -206,22 +223,20 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
             all_vars[2*(i*statebits+j)+1] = 2*(a_proj[i]*statebits+j)+1;
         }
     }
-    rel->all_variables = sylvan_ref(sylvan_set_fromarray(all_vars, statebits * a_k * 2));
-    rel->all_action_variables = sylvan_ref(sylvan_set_addall(rel->all_variables, rel->dom->action_variables));
+    rel->all_variables = sylvan_set_fromarray(all_vars, statebits * a_k * 2);
+    rel->all_action_variables = sylvan_set_addall(rel->all_variables, rel->dom->action_variables);
 
     /* Compute cur_is_next for variables in ro_proj */
-    BDD cur_is_next = sylvan_true;
-    bdd_refs_push(cur_is_next);
+    rel->cur_is_next = sylvan_true;
     for (int i=ro_k-1; i>=0; i--) {
         for (int j=statebits-1; j>=0; j--) {
-            BDD low = bdd_refs_push(sylvan_makenode(2*(ro_proj[i]*statebits+j)+1, cur_is_next, sylvan_false));
-            BDD high = sylvan_makenode(2*(ro_proj[i]*statebits+j)+1, sylvan_false, cur_is_next);
-            bdd_refs_pop(2);
-            cur_is_next = bdd_refs_push(sylvan_makenode(2*(ro_proj[i]*statebits+j), low, high));
+            BDD low = sylvan_makenode(2*(ro_proj[i]*statebits+j)+1, rel->cur_is_next, sylvan_false);
+            bdd_refs_push(low);
+            BDD high = sylvan_makenode(2*(ro_proj[i]*statebits+j)+1, sylvan_false, rel->cur_is_next);
+            bdd_refs_pop(1);
+            rel->cur_is_next = sylvan_makenode(2*(ro_proj[i]*statebits+j), low, high);
         }
     }
-    bdd_refs_pop(1);
-    rel->cur_is_next = sylvan_ref(cur_is_next);
 
     return rel;
 }
@@ -232,11 +247,12 @@ rel_create_rw(vdom_t dom, int r_k, int *r_proj, int w_k, int *w_proj)
 static void
 rel_destroy(vrel_t rel)
 {
-    sylvan_deref(rel->bdd);
-    sylvan_deref(rel->state_variables);
-    sylvan_deref(rel->prime_variables);
-    sylvan_deref(rel->all_variables);
-    sylvan_deref(rel->all_action_variables);
+    sylvan_unprotect(&rel->bdd);
+    sylvan_unprotect(&rel->all_variables);
+    sylvan_unprotect(&rel->all_action_variables);
+    sylvan_unprotect(&rel->cur_is_next);
+    sylvan_unprotect(&rel->state_variables);
+    sylvan_unprotect(&rel->prime_variables);
     RTfree(rel);
 }
 
@@ -260,10 +276,7 @@ static void
 state_to_cube(const int* state, size_t state_length, uint8_t *arr)
 {
     for (size_t i=0; i<state_length; i++) {
-        for (int j=0; j<statebits; j++) {
-            *arr = (*state & (1LL<<(statebits-j-1))) ? 1 : 0;
-            arr++;
-        }
+        for (int j=0; j<statebits; j++) *arr++ = (*state & (1LL<<(statebits-j-1))) ? 1 : 0;
         state++;
     }
 }
@@ -462,14 +475,7 @@ set_example(vset_t set, int *e)
 
     uint8_t* cube = (uint8_t*)alloca(set->vector_size*statebits*sizeof(uint8_t));
     sylvan_sat_one(set->bdd, set->state_variables, cube);
-
-    size_t i;
-    int j;
-    for (i=0;i<set->vector_size;i++) {
-        for (j=0;j<statebits;j++) {
-            if (cube[i*statebits+j]==1) e[i] |= 1<<(statebits-j-1);
-        }
-    }
+    state_from_cube(e, set->vector_size, cube);
 }
 
 /**
@@ -675,7 +681,8 @@ rel_add_act(vrel_t rel, const int *src, const int *dst, const int *cpy, const in
     // make cube of src
     uint8_t src_cube[rel->r_k * statebits];
     state_to_cube(src, (size_t)rel->r_k, src_cube);
-    BDD src_bdd = bdd_refs_push(sylvan_cube(rel->state_variables, src_cube));
+    BDD src_bdd = sylvan_cube(rel->state_variables, src_cube);
+    bdd_refs_push(src_bdd);
 
     // Some custom code to create the BDD representing the dst+cpy structure
     BDD dst_bdd = sylvan_true;
@@ -683,14 +690,13 @@ rel_add_act(vrel_t rel, const int *src, const int *dst, const int *cpy, const in
         int k = rel->w_proj[i];
         if (cpy && cpy[i]) {
             // take copy of read
-            bdd_refs_push(dst_bdd);
             for (int j=statebits-1; j>=0; j--) {
-                BDD low = bdd_refs_push(sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false));
+                BDD low = sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false);
+                bdd_refs_push(low);
                 BDD high = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
-                bdd_refs_pop(2);
-                dst_bdd = bdd_refs_push(sylvan_makenode(2*(k*statebits+j), low, high));
+                bdd_refs_pop(1);
+                dst_bdd = sylvan_makenode(2*(k*statebits+j), low, high);
             }
-            bdd_refs_pop(1);
         } else {
             // actually write
             for (int j=statebits-1; j>=0; j--) {
@@ -706,23 +712,27 @@ rel_add_act(vrel_t rel, const int *src, const int *dst, const int *cpy, const in
     for (int i=0; i<actionbits; i++) {
         act_cube[i] = (act & (1LL<<(actionbits-i-1))) ? 1 : 0;
     }
-    BDD act_bdd = bdd_refs_push(sylvan_cube(rel->dom->action_variables, act_cube));
+    BDD act_bdd = sylvan_cube(rel->dom->action_variables, act_cube);
+    bdd_refs_push(act_bdd);
 
     // concatenate dst and act
-    BDD dst_and_act = bdd_refs_push(sylvan_and(dst_bdd, act_bdd));
+    BDD dst_and_act = sylvan_and(dst_bdd, act_bdd);
+    bdd_refs_pop(2);
+    bdd_refs_push(dst_and_act);
 
     // concatenate src and dst and act
-    BDD src_and_dst_and_act = bdd_refs_push(sylvan_and(src_bdd, dst_and_act));
+    BDD src_and_dst_and_act = sylvan_and(src_bdd, dst_and_act);
+    bdd_refs_pop(2);
+    bdd_refs_push(src_and_dst_and_act);
 
     // intersect with cur_is_next
-    BDD to_add = bdd_refs_push(sylvan_and(src_and_dst_and_act, rel->cur_is_next));
+    BDD to_add = sylvan_and(src_and_dst_and_act, rel->cur_is_next);
+    bdd_refs_pop(1);
+    bdd_refs_push(to_add);
 
     // add result to relation
-    BDD old = rel->bdd;
-    rel->bdd = sylvan_ref(sylvan_or(rel->bdd, to_add));
-    sylvan_deref(old);
-
-    bdd_refs_pop(6);
+    rel->bdd = sylvan_or(rel->bdd, to_add);
+    bdd_refs_pop(1);
 }
 
 /**
@@ -739,7 +749,8 @@ rel_add_cpy(vrel_t rel, const int *src, const int *dst, const int *cpy)
     // make cube of src
     uint8_t src_cube[rel->r_k * statebits];
     state_to_cube(src, (size_t)rel->r_k, src_cube);
-    BDD src_bdd = bdd_refs_push(sylvan_cube(rel->state_variables, src_cube));
+    BDD src_bdd = sylvan_cube(rel->state_variables, src_cube);
+    bdd_refs_push(src_bdd);
 
     // Some custom code to create the BDD representing the dst+cpy structure
     BDD dst_bdd = sylvan_true;
@@ -747,14 +758,13 @@ rel_add_cpy(vrel_t rel, const int *src, const int *dst, const int *cpy)
         int k = rel->w_proj[i];
         if (cpy && cpy[i]) {
             // take copy of read
-            bdd_refs_push(dst_bdd);
             for (int j=statebits-1; j>=0; j--) {
-                BDD low = bdd_refs_push(sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false));
+                BDD low = sylvan_makenode(2*(k*statebits+j)+1, dst_bdd, sylvan_false);
+                bdd_refs_push(low);
                 BDD high = sylvan_makenode(2*(k*statebits+j)+1, sylvan_false, dst_bdd);
-                bdd_refs_pop(2);
-                dst_bdd = bdd_refs_push(sylvan_makenode(2*(k*statebits+j), low, high));
+                bdd_refs_pop(1);
+                dst_bdd = sylvan_makenode(2*(k*statebits+j), low, high);
             }
-            bdd_refs_pop(1);
         } else {
             // actually write
             for (int j=statebits-1; j>=0; j--) {
@@ -766,17 +776,18 @@ rel_add_cpy(vrel_t rel, const int *src, const int *dst, const int *cpy)
     bdd_refs_push(dst_bdd);
 
     // concatenate src and dst
-    BDD src_and_dst = bdd_refs_push(sylvan_and(src_bdd, dst_bdd));
+    BDD src_and_dst = sylvan_and(src_bdd, dst_bdd);
+    bdd_refs_pop(2);
+    bdd_refs_push(src_and_dst);
 
     // intersect with cur_is_next
-    BDD to_add = bdd_refs_push(sylvan_and(src_and_dst, rel->cur_is_next));
+    BDD to_add = sylvan_and(src_and_dst, rel->cur_is_next);
+    bdd_refs_pop(1);
+    bdd_refs_push(to_add);
 
     // add result to relation
-    BDD old = rel->bdd;
-    rel->bdd = sylvan_ref(sylvan_or(rel->bdd, to_add));
-    sylvan_deref(old);
-
-    bdd_refs_pop(4);
+    rel->bdd = sylvan_or(rel->bdd, to_add);
+    bdd_refs_pop(1);
 }
 
 /**
@@ -805,9 +816,8 @@ struct rel_update_context
 TASK_2(BDD, bdd_rel_updater, void*, _ctx, uint8_t*, arr)
 {
     struct rel_update_context *ctx = (struct rel_update_context*)_ctx;
-    size_t vec_len = ctx->vec_len;
-    int vec[vec_len];
-    state_from_cube(vec, vec_len, arr);
+    int vec[ctx->vec_len];
+    state_from_cube(vec, ctx->vec_len, arr);
 
     struct vector_relation dummyrel;
     memcpy(&dummyrel, ctx->rel, sizeof(struct vector_relation));
@@ -854,74 +864,49 @@ rel_dot(FILE* fp, vrel_t rel)
 
 /* SAVING */
 static void
-post_save(FILE* f, vdom_t dom)
-{
-    sylvan_serialize_reset();
-    return;
-    (void)f;
-    (void)dom;
-}
-
-static void
 set_save(FILE* f, vset_t set)
 {
-    size_t bdd = sylvan_serialize_add(set->bdd);
-    size_t state_vars = sylvan_serialize_add(set->state_variables);
-    sylvan_serialize_tofile(f);
-    fwrite(&bdd, sizeof(size_t), 1, f);
+    LACE_ME;
+    BDD sets[2];
+    sets[0] = set->bdd;
+    sets[1] = set->state_variables;
+    mtbdd_writer_tobinary(f, sets, 2);
     fwrite(&set->vector_size, sizeof(size_t), 1, f);
-    fwrite(&state_vars, sizeof(size_t), 1, f);
 }
 
 static void
 rel_save_proj(FILE* f, vrel_t rel)
 {
-    return; // Do not store anything
-    (void)f;
-    (void)rel;
+    fwrite(&rel->r_k, sizeof(int), 1, f);
+    fwrite(&rel->w_k, sizeof(int), 1, f);
+    fwrite(rel->r_proj, sizeof(int), rel->r_k, f);
+    fwrite(rel->w_proj, sizeof(int), rel->w_k, f);
 }
 
 static void
 rel_save(FILE* f, vrel_t rel)
 {
-    size_t bdd = sylvan_serialize_add(rel->bdd);
-    size_t all_vars = sylvan_serialize_add(rel->all_variables);
-    sylvan_serialize_tofile(f);
-    fwrite(&bdd, sizeof(size_t), 1, f);
-    fwrite(&all_vars, sizeof(size_t), 1, f);
+    LACE_ME;
+    mtbdd_writer_tobinary(f, &rel->bdd, 1);
 }
 
 /* LOADING */
-static void
-post_load(FILE* f, vdom_t dom)
-{
-    sylvan_serialize_reset();
-    return;
-    (void)f;
-    (void)dom;
-}
-
 static vset_t
 set_load(FILE* f, vdom_t dom)
 {
+    LACE_ME;
+    BDD sets[2];
+    if (mtbdd_reader_frombinary(f, sets, 2) != 0) Abort("Invalid file format.");
+
     vset_t set = (vset_t)RTmalloc(sizeof(struct vector_set));
     set->dom = dom;
-
-    sylvan_serialize_fromfile(f);
-
-    size_t bdd, state_vars;
-    if ((fread(&bdd, sizeof(size_t), 1, f) != 1) ||
-        (fread(&set->vector_size, sizeof(size_t), 1, f) != 1) ||
-        (fread(&state_vars, sizeof(size_t), 1, f) != 1)) {
-        Abort("invalid file format");
-    }
-
-    LACE_ME;
+    set->bdd = sets[0];
+    set->state_variables = sets[1];
 
     sylvan_protect(&set->bdd);
-    set->bdd = sylvan_serialize_get_reversed(bdd);
-    set->state_variables = sylvan_ref(sylvan_serialize_get_reversed(state_vars));
-    set->projection = sylvan_ref(sylvan_set_removeall(dom->state_variables, set->state_variables));
+    sylvan_protect(&set->state_variables);
+
+    if (fread(&set->vector_size, sizeof(size_t), 1, f) != 1) Abort("invalid file format");
 
     return set;
 }
@@ -929,29 +914,20 @@ set_load(FILE* f, vdom_t dom)
 static vrel_t 
 rel_load_proj(FILE* f, vdom_t dom)
 {
-    vrel_t rel = (vrel_t)RTmalloc(sizeof(struct vector_relation));
-    memset(rel, 0, sizeof(struct vector_relation));
-    rel->dom = dom;
-    return rel; // Do not actually load anything from file
-    (void)f;
+    int r_k, w_k;
+    if (fread(&r_k, sizeof(int), 1, f) != 1) Abort("Invalid file format.");
+    if (fread(&w_k, sizeof(int), 1, f) != 1) Abort("Invalid file format.");
+    int r_proj[r_k], w_proj[w_k];
+    if (fread(r_proj, sizeof(int), r_k, f) != (size_t)r_k) Abort("Invalid file format.");
+    if (fread(w_proj, sizeof(int), w_k, f) != (size_t)w_k) Abort("Invalid file format.");
+    return rel_create_rw(dom, r_k, r_proj, w_k, w_proj);
 }
 
 static void
 rel_load(FILE* f, vrel_t rel)
 {
-    if (rel->bdd) sylvan_deref(rel->bdd);
-    if (rel->all_variables) sylvan_deref(rel->all_variables);
-
-    sylvan_serialize_fromfile(f);
-
-    size_t bdd, all_vars;
-    if ((fread(&bdd, sizeof(size_t), 1, f) != 1) ||
-        (fread(&all_vars, sizeof(size_t), 1, f) != 1)) {
-        Abort("invalid file format");
-    }
-
-    rel->bdd = sylvan_ref(sylvan_serialize_get_reversed(bdd));
-    rel->all_variables = sylvan_ref(sylvan_serialize_get_reversed(all_vars));
+    LACE_ME;
+    if (mtbdd_reader_frombinary(f, &rel->bdd, 1) != 0) Abort("Invalid file format.");
 }
 
 static void
@@ -1009,8 +985,6 @@ dom_set_function_pointers(vdom_t dom)
     dom->shared.rel_dot=rel_dot;
 
     // no pre_load or pre_save
-    dom->shared.post_save=post_save;
-    dom->shared.post_load=post_load;
     dom->shared.dom_save=dom_save;
     dom->shared.set_save=set_save;
     dom->shared.set_load=set_load;
@@ -1102,6 +1076,8 @@ vdom_create_sylvan(int n)
     vdom_init_shared(dom,n);
     dom_set_function_pointers(dom);
 
+    LACE_ME;
+
     // Create state_variables and prime_variables
     BDDVAR state_vars[statebits * n];
     BDDVAR prime_vars[statebits * n];
@@ -1111,18 +1087,16 @@ vdom_create_sylvan(int n)
             prime_vars[i*statebits+j] = 2*(i*statebits+j)+1;
         }
     }
-
-    LACE_ME;
-
-    dom->state_variables = sylvan_ref(sylvan_set_fromarray(state_vars, statebits * n));
-    dom->prime_variables = sylvan_ref(sylvan_set_fromarray(prime_vars, statebits * n));
+    dom->state_variables = sylvan_set_fromarray(state_vars, statebits * n);
+    sylvan_protect(&dom->state_variables);
+    dom->prime_variables = sylvan_set_fromarray(prime_vars, statebits * n);
+    sylvan_protect(&dom->prime_variables);
 
     // Create action_variables
     BDDVAR action_vars[actionbits];
-    for (int i=0; i<actionbits; i++) {
-        action_vars[i] = 1000000+i;
-    }
-    dom->action_variables = sylvan_ref(sylvan_set_fromarray(action_vars, actionbits));
+    for (int i=0; i<actionbits; i++) action_vars[i] = 1000000+i;
+    dom->action_variables = sylvan_set_fromarray(action_vars, actionbits);
+    sylvan_protect(&dom->action_variables);
 
     return dom;
 }
