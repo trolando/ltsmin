@@ -49,7 +49,6 @@ struct vector_set
 
     BDD bdd;
     BDD state_variables;        // set of state variables in this set
-    BDD projection;             // set of state variables not in this set (for set_project)
 };
 
 struct vector_relation
@@ -86,11 +85,9 @@ set_create(vdom_t dom, int k, int* proj)
     set->dom = dom;
     set->bdd = sylvan_false; // Initialize with an empty BDD
     set->state_variables = sylvan_false;
-    set->projection = sylvan_false;
 
     sylvan_protect(&set->bdd);
     sylvan_protect(&set->state_variables);
-    sylvan_protect(&set->projection);
 
     if (k>=0 && k<dom->shared.size) {
         // We are creating a projection
@@ -103,12 +100,10 @@ set_create(vdom_t dom, int k, int* proj)
             }
         }
         set->state_variables = sylvan_set_fromarray(state_vars, statebits * k);
-        set->projection = sylvan_set_removeall(dom->state_variables, set->state_variables);
     } else {
         // Use all variables
         set->vector_size = dom->shared.size;
         set->state_variables = dom->state_variables;
-        set->projection = sylvan_set_empty();
     }
 
     return set;
@@ -123,7 +118,6 @@ set_destroy(vset_t set)
 {
     sylvan_unprotect(&set->bdd);
     sylvan_unprotect(&set->state_variables);
-    sylvan_unprotect(&set->projection);
     RTfree(set);
 }
 
@@ -317,7 +311,7 @@ set_add(vset_t set, const int* e)
 
     // existential quantification
     bdd_refs_push(bdd);
-    bdd = sylvan_exists(bdd, set->projection);
+    bdd = sylvan_project(bdd, set->state_variables);
     bdd_refs_pop(1);
 
     // add to set
@@ -349,7 +343,7 @@ set_member(vset_t set, const int* e)
 
     // existential quantification
     bdd_refs_push(bdd);
-    bdd = sylvan_exists(bdd, set->projection);
+    bdd = sylvan_project(bdd, set->state_variables);
     bdd_refs_pop(1);
 
     // check if in set
@@ -394,7 +388,7 @@ set_clear(vset_t set)
 static void
 set_copy(vset_t dst, vset_t src)
 {
-    assert(dst->projection == src->projection);
+    assert(dst->state_variables == src->state_variables);
     dst->bdd = src->bdd;
 }
 
@@ -440,7 +434,6 @@ TASK_2(BDD, bdd_set_updater, void*, _ctx, uint8_t*, arr)
     dummyset.dom = ctx->set->dom;
     dummyset.vector_size = ctx->set->vector_size;
     dummyset.state_variables = ctx->set->state_variables;
-    dummyset.projection = ctx->set->projection;
     dummyset.bdd = sylvan_false;
 
     sylvan_protect(&dummyset.bdd);
@@ -636,9 +629,9 @@ set_prev(vset_t dst, vset_t src, vrel_t rel, vset_t univ)
 static void
 set_project(vset_t dst, vset_t src)
 {
-    if (dst->projection != src->projection) {
+    if (dst->state_variables != src->state_variables) {
         LACE_ME;
-        dst->bdd = sylvan_exists(src->bdd, dst->projection);
+        dst->bdd = sylvan_project(src->bdd, dst->state_variables);
     } else {
         dst->bdd = src->bdd;
     }
