@@ -11,6 +11,7 @@
 #include <hre-io/user.h>
 #include <vset-lib/vdom_object.h>
 #include <sylvan.h>
+#include <sylvan_int.h>
 
 static int statebits = 16;
 static int actionbits = 16;
@@ -837,6 +838,108 @@ rel_update(vrel_t dst, vset_t src, vrel_update_cb cb, void* context)
     bdd_refs_pop(1);
 }
 
+/**
+ * Implementation of (parallel) saturation
+ * (assumes relations are ordered on first variable)
+ */
+TASK_4(BDD, go_sat, BDD, set, vrel_t*, rels, int, count, int, id)
+{
+    /* Terminal cases */
+    if (set == sylvan_false) return sylvan_false;
+    if (count == 0) return set;
+
+    /* Consult the cache */
+    BDD result;
+    BDD _set = set;
+    if (cache_get3(200LL<<40, _set, (uint64_t)rels, id, &result)) return result;
+    bdd_refs_pushptr(&_set);
+
+    /* Check if the relation should be applied */
+    uint32_t var = sylvan_var(rels[0]->all_variables);
+    if (set == sylvan_true || var <= sylvan_var(set)) {
+        /* Count the number of relations starting here */
+        int n = 1;
+        while (n < count && var == sylvan_var(rels[n]->all_variables)) n++;
+        /*
+         * Compute until fixpoint:
+         * - SAT deeper
+         * - learn and chain-apply all current level once
+         */
+        BDD prev = sylvan_false;
+        BDD step = sylvan_false;
+        bdd_refs_pushptr(&set);
+        bdd_refs_pushptr(&prev);
+        bdd_refs_pushptr(&step);
+        while (prev != set) {
+            prev = set;
+            // SAT deeper
+            set = CALL(go_sat, set, rels+n, count-n, id);
+            // learn and chain-apply all current level once
+            for (int i=0;i<n;i++) {
+                if (rels[i]->expand != NULL) {
+                    // project set
+                    struct vector_set dummy;
+                    dummy.dom = rels[i]->dom;
+                    dummy.vector_size = rels[i]->r_k;
+                    dummy.state_variables = rels[i]->state_variables;
+                    dummy.bdd = sylvan_project(set, dummy.state_variables);
+                    // call expand callback
+                    bdd_refs_pushptr(&dummy.bdd);
+                    rels[i]->expand(rels[i], &dummy, rels[i]->expand_ctx);
+                    bdd_refs_popptr(1);
+                }
+                // and then step
+                step = sylvan_relnext(set, rels[i]->bdd, rels[i]->all_variables);
+                set = sylvan_or(set, step);
+                step = sylvan_false; // unset, for gc
+            }
+        }
+        bdd_refs_popptr(3);
+        result = set;
+    } else {
+        /* Recursive computation */
+        bdd_refs_spawn(SPAWN(go_sat, sylvan_low(set), rels, count, id));
+        BDD high = bdd_refs_push(CALL(go_sat, sylvan_high(set), rels, count, id));
+        BDD low = bdd_refs_sync(SYNC(go_sat));
+        bdd_refs_pop(1);
+        result = sylvan_makenode(sylvan_var(set), low, high);
+    }
+    // Store in cache
+    cache_put3(200LL<<40, _set, (uint64_t)rels, id, result);
+    bdd_refs_popptr(1);
+    return result;
+}
+
+static void
+set_least_fixpoint(vset_t dst, vset_t src, vrel_t _rels[], int rel_count)
+{
+    // Create copy of rels
+    vrel_t rels[rel_count];
+    memcpy(rels, _rels, sizeof(vrel_t[rel_count]));
+
+    // Sort the rels (using gnome sort)
+    int i = 1, j = 2;
+    vrel_t t;
+    while (i < rel_count) {
+        vrel_t *p = rels+i, *q = p-1;
+        if (sylvan_var((*q)->all_variables) > sylvan_var((*p)->all_variables)) {
+            t = *q;
+            *q = *p;
+            *p = t;
+            if (--i) continue;
+        }
+        i = j++;
+    }
+
+    // Get next id (for cache)
+    static volatile int id = 0;
+    int _id = __sync_fetch_and_add(&id, 1);
+
+    // Go!
+    LACE_ME;
+    dst->bdd = CALL(go_sat, src->bdd, rels, rel_count, _id);
+}
+
 static void
 set_reorder()
 {
@@ -971,7 +1074,7 @@ dom_set_function_pointers(vdom_t dom)
     dom->shared.rel_count=rel_count;
     dom->shared.set_next=set_next;
     dom->shared.set_prev=set_prev;
-    // set_least_fixpoint
+    dom->shared.set_least_fixpoint=set_least_fixpoint;
 
     dom->shared.reorder=set_reorder;
     dom->shared.set_dot=set_dot;
