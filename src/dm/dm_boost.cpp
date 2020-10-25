@@ -122,7 +122,7 @@ parse_ordering(std::vector<Vertex> inv_perm, typename property_map<Graph, vertex
                int* row_perm, int* col_perm, const matrix_t* m)
 {
     Warning(infoLong, "Parsing ordering");
-    int r = 0, c = 0;
+    unsigned int r = 0, c = 0;
     unsigned int nrows = dm_nrows(m);
     unsigned int ncols = dm_ncols(m);
     for (typename std::vector<Vertex>::const_iterator i=inv_perm.begin(); i != inv_perm.end(); ++i) {

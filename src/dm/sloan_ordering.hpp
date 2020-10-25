@@ -628,7 +628,7 @@ namespace boost {
         e = disconnected_sloan_start_end_vertices(G, s, color, degree);
         //printf("== %d %p\n", s, permutation);
         //printf("   best start: %d \n", s);
-        for(int n = 0; n < num_vertices(G); ++n) {
+        for(unsigned int n = 0; n < num_vertices(G); ++n) {
             //printf("%d has color %s\n", n, get(color, n) == ColorForStart::white()?"white":ColorForStart::black()?"black":ColorForStart::gray()?"gray":ColorForStart::green()?"green":"other");
             if(get(color, n) == ColorForStart::black()) {
                 put(color, n, ColorForStart::green());
@@ -649,6 +649,7 @@ namespace boost {
         permutation = sloan_ordering(G, s, e, permutation, color, degree, priority, W1, W2);
     }
 
+    return permutation;
   }
 
 } // namespace boost
