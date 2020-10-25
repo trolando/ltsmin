@@ -14,7 +14,7 @@ sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 \
 
 sudo apt-get update
 
-sudo apt-get -yq --no-install-suggests --no-install-recommends install wine \
+sudo apt-get -yq --no-install-suggests --no-install-recommends --allow-unauthenticated install wine \
     mxe-x86-64-w64-mingw32.static-zlib \
     mxe-x86-64-w64-mingw32.static-popt \
     mxe-x86-64-w64-mingw32.static-mman-win32
