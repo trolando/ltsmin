@@ -25,7 +25,10 @@ addons:
       - zlib1g-dev
       - xmlto
 
-stage: cache warmup
+stages:
+- cache warmup
+- test
+- deploy
 
 before_install:
   - travis/before_install-$TRAVIS_OS_NAME.sh
