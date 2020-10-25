@@ -137,7 +137,7 @@ parse_ordering(std::vector<Vertex> inv_perm, typename property_map<Graph, vertex
             }
         }
     }
-    if (r != dm_nrows(m) || c != dm_ncols(m)) {
+    if (r != (unsigned)dm_nrows(m) || c != (unsigned)dm_ncols(m)) {
         Warning(lerror, "Got invalid permutation from boost. "
                 "This may happen when the graph representation of the matrix "
                 "has disconnected sub graphs. This needs to be fixed in boost. "
