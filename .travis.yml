@@ -1,7 +1,6 @@
 language: cpp
 
 dist: xenial
-sudo: false
 
 cache:
   directories:
@@ -36,7 +35,8 @@ before_install:
 
 jobs:
   include:
-    - compiler: clang
+    - stage: cache warmup
+      compiler: clang
       os: osx
       install: travis/install-osx.sh
       script: skip
@@ -113,17 +113,15 @@ jobs:
       deploy:
         - provider: releases
           # define $GITHUB_TOKEN in Travis CI build environment.
-          api_key: $GITHUB_TOKEN
+          token: $GITHUB_TOKEN
           file:
             - "ltsmin-$TRAVIS_TAG-source.tgz"
-          skip_cleanup: true
           on:
             tags: true
         - provider: pages
           local_dir: www/_site
-          skip_cleanup: true
           # define $GITHUB_TOKEN in Travis CI build environment.
-          github_token: $GITHUB_TOKEN
+          token: $GITHUB_TOKEN
           on:
             tags: true
             condition: "x$TRAVIS_TAG = xv$LTSMIN_VERSION"
@@ -138,10 +136,9 @@ jobs:
       deploy:
         - provider: releases
           # define $GITHUB_TOKEN in Travis CI build environment.
-          api_key: $GITHUB_TOKEN
+          token: $GITHUB_TOKEN
           file:
             - "/tmp/$LTSMIN_DISTNAME.tgz"
-          skip_cleanup: true
           on:
             tags: true
       stage: deploy
@@ -155,10 +152,9 @@ jobs:
       deploy:
         - provider: releases
           # define $GITHUB_TOKEN in Travis CI build environment.
-          api_key: $GITHUB_TOKEN
+          token: $GITHUB_TOKEN
           file:
             - "/tmp/$LTSMIN_DISTNAME.tgz"
-          skip_cleanup: true
           on:
             tags: true
       stage: deploy
@@ -172,10 +168,9 @@ jobs:
       deploy:
         - provider: releases
           # define $GITHUB_TOKEN in Travis CI build environment.
-          api_key: $GITHUB_TOKEN
+          token: $GITHUB_TOKEN
           file:
             - "/tmp/$LTSMIN_DISTNAME.tgz"
-          skip_cleanup: true
           on:
             tags: true
       stage: deploy
