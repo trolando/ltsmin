@@ -1,6 +1,6 @@
 language: cpp
 
-dist: trusty
+dist: xenial
 sudo: false
 
 cache:
@@ -11,13 +11,13 @@ cache:
 addons:
   apt:
     sources:
-      - ubuntu-toolchain-r-test # for gcc-6
+#      - ubuntu-toolchain-r-test # for gcc-6
     packages:
       - asciidoc
       - dejagnu
       - doxygen
-      - g++-6
-      - gcc-6
+#      - g++-6
+#      - gcc-6
       - libboost-dev
       - libgmp-dev
       - liblzma-dev
