@@ -18,7 +18,7 @@ addons:
       - doxygen
 #      - g++-6
 #      - gcc-6
-      - libtool
+      - libtool-bin
       - libboost-dev
       - libgmp-dev
       - liblzma-dev
