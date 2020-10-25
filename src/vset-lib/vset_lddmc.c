@@ -289,6 +289,9 @@ set_copy_match(vset_t dst, vset_t src, int p_len, int *proj, int *match)
 }
 
 static void
+#ifdef __GNUC__
+__attribute__((unused))
+#endif
 set_copy_match_set(vset_t dst, vset_t src, vset_t match, int p_len, int *proj)
 {
     LACE_ME;
