@@ -245,7 +245,7 @@ namespace boost {
     }while(new_start);
     
     return e;
-    void(color); // Stop complaining about unused parameters
+    (void)color; // Stop complaining about unused parameters
   }
 
   template <class Graph, class ColorMap, class DegreeMap>
