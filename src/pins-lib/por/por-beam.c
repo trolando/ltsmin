@@ -593,7 +593,6 @@ static inline void
 beam_enforce_L2 (por_context* ctx)
 {
     beam_t             *beam = (beam_t *) ctx->alg;
-    search_context_t   *s1 = beam->search[0];
     while (true) {
         beam_enforce_L1_and_key (ctx);
 
